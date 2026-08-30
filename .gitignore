@@ -1,0 +1,28 @@
+# Dependencies and build outputs
+node_modules/
+dist/
+build/
+coverage/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Omnia personal data and runtime artifacts
+data/
+*.db
+*.db-shm
+*.db-wal
+logs/
+tmp/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.user
