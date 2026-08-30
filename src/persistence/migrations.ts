@@ -52,4 +52,22 @@ export const migrations: readonly Migration[] = [
       ) STRICT;
     `,
   ),
+  migration(
+    2,
+    "model_usage",
+    `
+      CREATE TABLE model_usage (
+        usage_id INTEGER PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL,
+        cached_input_tokens INTEGER NOT NULL,
+        output_tokens INTEGER NOT NULL,
+        cost_usd REAL NOT NULL,
+        occurred_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX model_usage_occurred_at_idx ON model_usage(occurred_at);
+    `,
+  ),
 ];

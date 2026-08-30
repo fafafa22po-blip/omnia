@@ -5,6 +5,7 @@ export type TaskLimits = Readonly<{
   maxRetriesPerAction: number;
   timeoutMs: number;
   maxCostUsd: number;
+  maxMonthlyCostUsd: number;
 }>;
 
 export type LocalConfig = Readonly<{
@@ -65,6 +66,7 @@ export function loadLocalConfig(
       ),
       timeoutMs: positiveInteger(environment, "OMNIA_TASK_TIMEOUT_MS", 120_000),
       maxCostUsd: positiveNumber(environment, "OMNIA_MAX_COST_USD", 0.25),
+      maxMonthlyCostUsd: positiveNumber(environment, "OMNIA_MAX_MONTHLY_COST_USD", 10),
     },
   };
 }

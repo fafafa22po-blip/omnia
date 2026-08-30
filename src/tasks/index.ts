@@ -2,7 +2,15 @@ import type { ActionJournal, Evidence } from "../actions/index.js";
 import type { AuthorityDenialReason, AuthorityGate, ProposedAction } from "../authority/index.js";
 import { CapabilityRegistry } from "../capabilities/index.js";
 import type { TaskLimits } from "../config/index.js";
-import type { ActionObservation, ModelGateway, ModelResponse } from "../models/index.js";
+import {
+  InMemoryModelUsageLedger,
+  type ActionObservation,
+  type ModelGateway,
+  type ModelInput,
+  type ModelResponse,
+  type ModelTier,
+  type ModelUsageLedger,
+} from "../models/index.js";
 import {
   errorMessage,
   randomIdGenerator,
@@ -15,12 +23,15 @@ import {
 export type TaskRequest = Readonly<{
   id: string;
   objective: string;
+  inputs?: readonly ModelInput[];
+  modelTier?: ModelTier;
 }>;
 
 export type TaskStopReason =
   | AuthorityDenialReason
   | "cost_limit"
   | "missing_evidence"
+  | "monthly_cost_limit"
   | "retry_limit"
   | "step_limit"
   | "time_limit";
@@ -65,6 +76,7 @@ type TaskHarnessDependencies = Readonly<{
   capabilities: CapabilityRegistry;
   journal: ActionJournal;
   limits: TaskLimits;
+  usageLedger?: ModelUsageLedger;
   clock?: Clock;
   ids?: IdGenerator;
 }>;
@@ -81,6 +93,7 @@ export class TaskHarness {
   readonly #capabilities: CapabilityRegistry;
   readonly #journal: ActionJournal;
   readonly #limits: TaskLimits;
+  readonly #usageLedger: ModelUsageLedger;
   readonly #clock: Clock;
   readonly #ids: IdGenerator;
   #active = false;
@@ -91,6 +104,7 @@ export class TaskHarness {
     this.#capabilities = dependencies.capabilities;
     this.#journal = dependencies.journal;
     this.#limits = dependencies.limits;
+    this.#usageLedger = dependencies.usageLedger ?? new InMemoryModelUsageLedger();
     this.#clock = dependencies.clock ?? systemClock;
     this.#ids = dependencies.ids ?? randomIdGenerator;
   }
@@ -125,6 +139,23 @@ export class TaskHarness {
           return stopped("time_limit");
         }
 
+        let monthlySpent: number;
+        try {
+          monthlySpent = await this.#usageLedger.spentInMonth(this.#clock.now());
+        } catch (error) {
+          return {
+            status: "failed",
+            taskId: task.id,
+            error: errorMessage(error),
+            evidence,
+            steps,
+            costUsd,
+          };
+        }
+        if (monthlySpent >= this.#limits.maxMonthlyCostUsd) {
+          return stopped("monthly_cost_limit");
+        }
+
         let response: ModelResponse;
         try {
           response = await this.#withinDeadline(remainingMs, (signal) =>
@@ -132,10 +163,20 @@ export class TaskHarness {
               {
                 taskId: task.id,
                 objective: task.objective,
+                inputs: [
+                  { type: "text", text: task.objective },
+                  ...(task.inputs ?? []),
+                ],
+                availableActions: this.#capabilities.listActions(),
                 observations,
+                modelTier: task.modelTier ?? "usual",
                 budget: {
                   remainingSteps: this.#limits.maxSteps - steps,
                   remainingCostUsd: Math.max(0, this.#limits.maxCostUsd - costUsd),
+                  remainingMonthlyCostUsd: Math.max(
+                    0,
+                    this.#limits.maxMonthlyCostUsd - monthlySpent,
+                  ),
                 },
               },
               signal,
@@ -167,8 +208,27 @@ export class TaskHarness {
           };
         }
         costUsd += response.usage.costUsd;
+        try {
+          await this.#usageLedger.record({
+            taskId: task.id,
+            usage: response.usage,
+            occurredAt: this.#clock.now(),
+          });
+        } catch (error) {
+          return {
+            status: "failed",
+            taskId: task.id,
+            error: errorMessage(error),
+            evidence,
+            steps,
+            costUsd,
+          };
+        }
         if (costUsd > this.#limits.maxCostUsd) {
           return stopped("cost_limit");
+        }
+        if (monthlySpent + response.usage.costUsd > this.#limits.maxMonthlyCostUsd) {
+          return stopped("monthly_cost_limit");
         }
 
         if (response.decision.type === "complete") {

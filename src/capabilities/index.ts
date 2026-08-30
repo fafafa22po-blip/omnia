@@ -66,6 +66,20 @@ export class CapabilityRegistry {
     return action;
   }
 
+  listActions(): readonly Readonly<{
+    capabilityId: string;
+    actionName: string;
+    description: string;
+  }>[] {
+    return [...this.#adapters.values()].flatMap((adapter) =>
+      adapter.manifest.actions.map((action) => ({
+        capabilityId: adapter.manifest.id,
+        actionName: action.name,
+        description: action.description,
+      })),
+    );
+  }
+
   execute(
     capabilityId: string,
     actionName: string,

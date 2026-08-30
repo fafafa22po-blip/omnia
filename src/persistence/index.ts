@@ -5,6 +5,7 @@ import { DatabaseSync, type StatementSync } from "node:sqlite";
 import type { ActionJournal, ActionOutcome, Evidence } from "../actions/index.js";
 import type { ProposedAction } from "../authority/index.js";
 import type { Commitment, ExplicitMemoryStore, Memory } from "../memory/index.js";
+import type { ModelUsageLedger, ModelUsageRecord } from "../models/index.js";
 import type { JsonValue } from "../shared/index.js";
 import { migrations } from "./migrations.js";
 
@@ -27,6 +28,8 @@ type CommitmentRow = Readonly<{
   ends_at: string | null;
   created_at: string;
 }>;
+
+type ModelUsageSumRow = Readonly<{ total: number }>;
 
 function asRows<T>(statement: StatementSync): readonly T[] {
   return statement.all() as T[];
@@ -134,15 +137,57 @@ class SqliteExplicitMemoryStore implements ExplicitMemoryStore {
   }
 }
 
+class SqliteModelUsageLedger implements ModelUsageLedger {
+  readonly #database: DatabaseSync;
+
+  constructor(database: DatabaseSync) {
+    this.#database = database;
+  }
+
+  async record(entry: ModelUsageRecord): Promise<void> {
+    this.#database
+      .prepare(
+        `INSERT INTO model_usage (
+          task_id, model_id, input_tokens, cached_input_tokens, output_tokens, cost_usd,
+          occurred_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        entry.taskId,
+        entry.usage.modelId,
+        entry.usage.inputTokens,
+        entry.usage.cachedInputTokens,
+        entry.usage.outputTokens,
+        entry.usage.costUsd,
+        entry.occurredAt.toISOString(),
+      );
+  }
+
+  async spentInMonth(at: Date): Promise<number> {
+    const start = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1));
+    const end = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1));
+    const row = this.#database
+      .prepare(
+        `SELECT COALESCE(SUM(cost_usd), 0) AS total
+         FROM model_usage
+         WHERE occurred_at >= ? AND occurred_at < ?`,
+      )
+      .get(start.toISOString(), end.toISOString()) as ModelUsageSumRow;
+    return row.total;
+  }
+}
+
 export class SqlitePersistence {
   readonly #database: DatabaseSync;
   readonly actions: ActionJournal;
   readonly memory: ExplicitMemoryStore;
+  readonly modelUsage: ModelUsageLedger;
 
   private constructor(database: DatabaseSync) {
     this.#database = database;
     this.actions = new SqliteActionJournal(database);
     this.memory = new SqliteExplicitMemoryStore(database);
+    this.modelUsage = new SqliteModelUsageLedger(database);
   }
 
   static open(path: string): SqlitePersistence {

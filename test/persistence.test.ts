@@ -12,11 +12,14 @@ describe("SqlitePersistence", () => {
     const path = join(directory, "omnia.sqlite");
 
     const first = SqlitePersistence.open(path);
-    expect(first.appliedMigrations()).toMatchObject([{ version: 1, name: "foundation" }]);
+    expect(first.appliedMigrations()).toMatchObject([
+      { version: 1, name: "foundation" },
+      { version: 2, name: "model_usage" },
+    ]);
     first.close();
 
     const second = SqlitePersistence.open(path);
-    expect(second.appliedMigrations()).toHaveLength(1);
+    expect(second.appliedMigrations()).toHaveLength(2);
     second.close();
   });
 
@@ -40,6 +43,29 @@ describe("SqlitePersistence", () => {
     await expect(persistence.memory.listCommitments()).resolves.toMatchObject([
       { id: "commitment-1", description: "Examen final" },
     ]);
+    persistence.close();
+  });
+
+  it("conserva el consumo de modelos para aplicar el presupuesto mensual", async () => {
+    const persistence = SqlitePersistence.open(":memory:");
+    await persistence.modelUsage.record({
+      taskId: "task-usage",
+      usage: {
+        modelId: "gpt-5.6-terra",
+        inputTokens: 100,
+        cachedInputTokens: 20,
+        outputTokens: 50,
+        costUsd: 0.002,
+      },
+      occurredAt: new Date("2026-08-30T12:00:00.000Z"),
+    });
+
+    await expect(
+      persistence.modelUsage.spentInMonth(new Date("2026-08-15T00:00:00.000Z")),
+    ).resolves.toBeCloseTo(0.002);
+    await expect(
+      persistence.modelUsage.spentInMonth(new Date("2026-09-01T00:00:00.000Z")),
+    ).resolves.toBe(0);
     persistence.close();
   });
 });

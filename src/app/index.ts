@@ -2,7 +2,7 @@ import type { ActionJournal } from "../actions/index.js";
 import type { AuthorityGate } from "../authority/index.js";
 import { CapabilityRegistry, type CapabilityAdapter } from "../capabilities/index.js";
 import type { TaskLimits } from "../config/index.js";
-import type { ModelGateway } from "../models/index.js";
+import type { ModelGateway, ModelUsageLedger } from "../models/index.js";
 import { TaskHarness } from "../tasks/index.js";
 
 export type OmniaDependencies = Readonly<{
@@ -11,6 +11,7 @@ export type OmniaDependencies = Readonly<{
   journal: ActionJournal;
   capabilities: readonly CapabilityAdapter[];
   limits: TaskLimits;
+  usageLedger: ModelUsageLedger;
 }>;
 
 export function createOmnia(dependencies: OmniaDependencies): TaskHarness {
@@ -20,5 +21,6 @@ export function createOmnia(dependencies: OmniaDependencies): TaskHarness {
     journal: dependencies.journal,
     capabilities: new CapabilityRegistry(dependencies.capabilities),
     limits: dependencies.limits,
+    usageLedger: dependencies.usageLedger,
   });
 }

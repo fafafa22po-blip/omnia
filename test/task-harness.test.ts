@@ -7,7 +7,11 @@ import {
   type CapabilityAdapter,
   type CapabilityResult,
 } from "../src/capabilities/index.js";
-import type { ModelGateway, ModelResponse } from "../src/models/index.js";
+import {
+  InMemoryModelUsageLedger,
+  type ModelGateway,
+  type ModelResponse,
+} from "../src/models/index.js";
 import { TaskAlreadyActiveError, TaskHarness } from "../src/tasks/index.js";
 
 const limits = {
@@ -15,6 +19,7 @@ const limits = {
   maxRetriesPerAction: 0,
   timeoutMs: 1_000,
   maxCostUsd: 1,
+  maxMonthlyCostUsd: 10,
 } as const;
 
 function sequenceModel(responses: readonly ModelResponse[]): ModelGateway {
@@ -55,11 +60,23 @@ function actionThenComplete(): readonly ModelResponse[] {
         actionName: "inspect",
         input: { path: "document.pdf" },
       },
-      usage: { costUsd: 0.1 },
+      usage: {
+        modelId: "fake",
+        inputTokens: 10,
+        cachedInputTokens: 0,
+        outputTokens: 10,
+        costUsd: 0.1,
+      },
     },
     {
       decision: { type: "complete", summary: "Archivo inspeccionado." },
-      usage: { costUsd: 0.1 },
+      usage: {
+        modelId: "fake",
+        inputTokens: 10,
+        cachedInputTokens: 0,
+        outputTokens: 10,
+        costUsd: 0.1,
+      },
     },
   ];
 }
@@ -139,7 +156,16 @@ describe("TaskHarness", () => {
         await new Promise<void>((resolve) => {
           release = resolve;
         });
-        return { decision: { type: "complete", summary: "Sin Evidencia" }, usage: { costUsd: 0 } };
+        return {
+          decision: { type: "complete", summary: "Sin Evidencia" },
+          usage: {
+            modelId: "fake",
+            inputTokens: 0,
+            cachedInputTokens: 0,
+            outputTokens: 0,
+            costUsd: 0,
+          },
+        };
       },
     };
     const harness = new TaskHarness({
@@ -156,5 +182,45 @@ describe("TaskHarness", () => {
     );
     release?.();
     await first;
+  });
+
+  it("detiene la Tarea cuando el consumo mensual supera el límite", async () => {
+    const occurredAt = new Date("2026-08-30T12:00:00.000Z");
+    const usageLedger = new InMemoryModelUsageLedger();
+    await usageLedger.record({
+      taskId: "earlier-task",
+      usage: {
+        modelId: "fake",
+        inputTokens: 100,
+        cachedInputTokens: 0,
+        outputTokens: 50,
+        costUsd: 9.95,
+      },
+      occurredAt,
+    });
+    const response = actionThenComplete()[0];
+    if (response === undefined) {
+      throw new Error("La prueba requiere una decisión preparada.");
+    }
+    const harness = new TaskHarness({
+      model: sequenceModel([response]),
+      authority: new SessionAuthority(),
+      capabilities: new CapabilityRegistry([
+        testCapability("low", async () => ({ evidence: [] })),
+      ]),
+      journal: new InMemoryActionJournal(),
+      usageLedger,
+      limits,
+      clock: { now: () => occurredAt },
+    });
+
+    const result = await harness.run({ id: "task-monthly", objective: "Inspecciona un PDF" });
+
+    expect(result).toMatchObject({
+      status: "stopped",
+      reason: "monthly_cost_limit",
+      costUsd: 0.1,
+    });
+    await expect(usageLedger.spentInMonth(occurredAt)).resolves.toBeCloseTo(10.05);
   });
 });

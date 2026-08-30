@@ -5,6 +5,8 @@ export * from "./capabilities/index.js";
 export * from "./config/index.js";
 export * from "./memory/index.js";
 export * from "./models/index.js";
+export * from "./models/openai.js";
 export * from "./persistence/index.js";
+export * from "./secrets/index.js";
 export * from "./shared/index.js";
 export * from "./tasks/index.js";

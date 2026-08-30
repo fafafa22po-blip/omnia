@@ -22,6 +22,7 @@ describe("loadLocalConfig", () => {
         maxRetriesPerAction: 1,
         timeoutMs: 120_000,
         maxCostUsd: 0.25,
+        maxMonthlyCostUsd: 10,
       },
     });
     expect(JSON.stringify(config)).not.toContain("no-debe-aparecer");
